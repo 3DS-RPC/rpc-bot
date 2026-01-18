@@ -190,7 +190,7 @@ async def get_title_id(interaction:discord.Interaction, friendcode:int):
         headers = {
             'User-Agent': '3DS-RPC/0.31',
         }
-        ret = requests.get('https://3dsrpc.com/api/u/%s' % friendcode, headers = headers).json()
+        ret = requests.get('https://3dsrpc.com/api/user/%s' % friendcode, headers = headers).json()
         if ret['Exception']:
             raise Exception(ret['Exception'])
         titleID = ret['User'].get('Presence', {}).get('titleID', None)
