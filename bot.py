@@ -27,6 +27,13 @@ regex = ('((http|https)://)(www.)?' +
 )
 pattern = re.compile(regex)
 
+def get_api_key():
+    try:
+        from private import api_key
+    except (ImportError, AttributeError):
+        return None
+    return api_key or None
+
 @bot.event
 async def on_ready():
     print('Logged in as %s (%s)' % (bot.user,bot.user.id))
@@ -181,22 +188,47 @@ async def create_error(interaction: discord.Interaction, error: discord.app_comm
 
 @bot.tree.command()
 @discord.app_commands.checks.cooldown(1, 60)
-async def get_title_id(interaction:discord.Interaction, friendcode:int):
+@discord.app_commands.describe(
+    friendcode = 'The friend code to look up',
+    network = 'The network the friend code belongs to (defaults to Nintendo)',
+)
+@discord.app_commands.choices(network = [
+    discord.app_commands.Choice(name = 'Nintendo Network', value = 'nintendo'),
+    discord.app_commands.Choice(name = 'Pretendo Network', value = 'pretendo'),
+])
+async def get_title_id(interaction:discord.Interaction, friendcode:int, network:discord.app_commands.Choice[str] = None):
     '''
     Gets the current title ID that a user is playing
     '''
     try:
         love.convertFriendCodeToPrincipalId(friendcode)
+        network_name = network.value if network else 'nintendo'
         headers = {
-            'User-Agent': '3DS-RPC/0.31',
+            'User-Agent': '3DS-RPC/0.32',
         }
-        ret = requests.get('https://3dsrpc.com/api/user/%s' % friendcode, headers = headers).json()
+        api_key = get_api_key()
+        if not api_key:
+            raise Exception('3DS-RPC now requires an API key. Add `api_key` to private.py (the shared bot key from 3DS-RPC\'s api/private.py).')
+        headers['X-API-KEY'] = api_key
+        response = requests.get(
+            'https://3dsrpc.com/api/user/%s/' % friendcode,
+            params = { 'network': network_name },
+            headers = headers,
+            timeout = 15,
+        )
+        try:
+            ret = response.json()
+        except ValueError:
+            raise Exception('3DS-RPC returned an invalid response (HTTP %s). Is the API route correct?' % response.status_code)
         if ret['Exception']:
-            raise Exception(ret['Exception'])
+            error = ret['Exception']
+            if isinstance(error, dict):
+                error = error.get('Error', error)
+            raise Exception(error)
         titleID = ret['User'].get('Presence', {}).get('titleID', None)
         updateID = ret['User'].get('Presence', {}).get('updateID', None)
         await interaction.response.send_message(
-            '`%s`: **%s**\nPlaying: `%s`\nUpdate: `%s`' % (ret['User']['friendCode'], ret['User']['username'], hex(int(titleID)).replace('0x', '').zfill(16) if titleID else 'Nothing!', updateID if updateID else 'None!'),
+            '`%s`: **%s** (%s)\nPlaying: `%s`\nUpdate: `%s`' % (ret['User']['friendCode'], ret['User']['username'], network_name.capitalize(), hex(int(titleID)).replace('0x', '').zfill(16) if titleID else 'Nothing!', updateID if updateID else 'None!'),
             ephemeral = False
         )
     except Exception as e:
